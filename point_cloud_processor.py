@@ -8,6 +8,9 @@ from scipy.spatial import ConvexHull as CH
 from sklearn.cluster import KMeans
 from colorsys import rgb_to_hsv
 import struct
+import pywavefront as wave
+import os
+import json
 def randomColor():
     return [random.randint(0,255),random.randint(0,255),random.randint(0,255)]
 def dotproduct(v1, v2):
@@ -60,25 +63,28 @@ def intersect(lst1, lst2):
     lst3 = [value for value in lst1 if value in lst2] 
     return lst3
 #files 
-in_file = 'pcd files/mug.pcd'
-orig_file = 'mug_orig.xyz'
-out_file1 = 'mug_out.xyz'
-out_file2 = 'mug_parts.xyz'
-cluster_file = 'mug_clusters.xyz'
-
+random.seed()
+name = "dumbell"
+in_file = 'pcd files/dumbell.ply'
+orig_file = './'+name+'/orig.xyz'
+out_file1 = './'+name+'/out.xyz'
+out_file2 = './'+name+'/parts.xyz'
+cluster_file ='./'+ name+'/clusters.xyz'
+if not os.path.exists('./'+ name):
+    os.makedirs(name)
 #tweak these to adjust how intercepts/ adjacency is found
-point_per_clust = 50
-distance_ratio_threshold = 2.5 
-sphericity_threshold = .01
-radius_buffer = 1.1
+show_plots = False
+point_per_clust = 20
+distance_ratio_threshold = 1.4
+sphericity_threshold = .05
+radius_buffer = 1
 
 print("Loading PCD")
-point_cloud = np.loadtxt(in_file, skiprows=12, max_rows=10000)
-num_clusters = int(len(point_cloud) / point_per_clust)
-point_data = point_cloud[:,:4]
-mins = []
-maxs = []
 
+point_cloud = np.loadtxt(in_file, skiprows=17, max_rows=12000)
+num_clusters = int(len(point_cloud) / point_per_clust)
+point_data = point_cloud[:,:3]
+'''
 print("Converting to XYZRGB")
 for i in range(len(point_data)):
     #scale data up a bit for ease of use
@@ -93,6 +99,7 @@ for i in range(len(point_data)):
     b = ba[2]
     h = rgb_to_hsv(r,g,b)[0]
     point_data[i][3] = h
+
 
 #write pcd file in .xyz format
 w = open(orig_file,'w')
@@ -109,7 +116,7 @@ for p in range(len(point_cloud)):
     b = ba[2]
     w.write("{} {} {} {} {} {}\n".format(point[0],point[1],point[2],r,g,b))
     printProgressBar(p,len(point_cloud)-1)
-
+'''
 
 print("Running Kmeans with "+str(num_clusters)+" clusters")
 kmeans = KMeans(n_clusters=num_clusters, random_state=random.randint(0,1000)).fit(point_data)
@@ -135,9 +142,9 @@ cag.add_nodes_from(unique(labels))
 adjacent_clusters = []
 clust_centers = []
 clust_radii = []
-intercept_clusters = []
-intercept_clusters2 = []
-
+sphere_intercept_clusters = []
+dist_intercept_clusters = []
+clust_data = []
 for c in range(len(cluster_points)):
     #find center of each cluster, as well as its endpoints using a convex hull
     clust = cluster_points[c]
@@ -184,12 +191,11 @@ for c in range(len(cluster_points)):
                 if ratio > max_ratio:
                     max_ratio = ratio
     #if the ratio is above the threshold mark it as an intercept cluster
-    if(max_ratio > distance_ratio_threshold and label not in intercept_clusters2):
-        intercept_clusters2.append(label)
-
+    if(max_ratio > distance_ratio_threshold and label not in dist_intercept_clusters):
+        dist_intercept_clusters.append(label)
+    
     #Test 2: Sphericity
 
-    
     #add the buffered radius to list of radii for future use
     clust_radii.append(max_dist*radius_buffer)
     
@@ -199,7 +205,10 @@ for c in range(len(cluster_points)):
     sphericity = box_vol / sphere_vol
     # if this ratio is above the threshold, mark it as an intercept cluster
     if sphericity > sphericity_threshold:
-        intercept_clusters.append(label)
+        sphere_intercept_clusters.append(label)
+    #print(str(max_ratio) +"  "+str(sphericity))
+    data = {'label':int(label),'sphericity':float(sphericity),'dist_ratio':float(max_ratio),'center':[float(avgPoint[0]),float(avgPoint[1]),float(avgPoint[2])],'adjacent_clusters':[]}
+    clust_data.append(data)
     #calculate spherictity
     printProgressBar(c,len(cluster_points)-1)
 
@@ -223,31 +232,35 @@ for c1 in c:
             edge = (c1,c2)
             adjacent_clusters.append(edge)
 
-#show plot of centers
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.scatter(np.array(xs),np.array(ys),np.array(zs),zdir = 'z')
-plt.show()
-print("Drawing Adjacency Graph")
 cag.add_edges_from(adjacent_clusters)
-nx.draw(cag)
-plt.savefig("graph.png") # save as png
-plt.show()
+#show plot of centers
+if show_plots:
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(np.array(xs),np.array(ys),np.array(zs),zdir = 'z')
+    plt.show()
+    print("Drawing Adjacency Graph")
 
-#plot adjacency graph on the  centers plot
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-for e in cag.edges:
-    xs = clust_centers[e[0]][0],clust_centers[e[1]][0]
-    ys = clust_centers[e[0]][1],clust_centers[e[1]][1]
-    zs = clust_centers[e[0]][2],clust_centers[e[1]][2]
-    line = plt3d.art3d.Line3D(xs, ys, zs)
-    ax.add_line(line)
-plt.show()
+    nx.draw(cag)
+    plt.show()
 
+    #plot adjacency graph on the  centers plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    for e in cag.edges:
+        xs = clust_centers[e[0]][0],clust_centers[e[1]][0]
+        ys = clust_centers[e[0]][1],clust_centers[e[1]][1]
+        zs = clust_centers[e[0]][2],clust_centers[e[1]][2]
+        line = plt3d.art3d.Line3D(xs, ys, zs)
+        ax.add_line(line)
+    plt.show()
 
-
-#write clustered points to output file
+for d in clust_data:
+    n = nx.all_neighbors(cag,d['label'])
+    ns = []
+    for i in n:
+        ns.append(int(i))
+    d['adjacent_clusters'] = ns
 print("Writing part differentiated PCD to new file")
 w = open(out_file1,'w')
 w.write("X Y Z R G B\n")
@@ -259,12 +272,12 @@ for p in range(len(point_cloud)):
     l = labels[p]
     while(len(point)<6):
         point = np.append(point,0)
-    if l in intercept_clusters:
-        if l in intercept_clusters2:
+    if l in sphere_intercept_clusters:
+        if l in dist_intercept_clusters:
             l = 0
         else:
             l = 1
-    elif l in intercept_clusters2:
+    elif l in dist_intercept_clusters:
         l = 2
     else:
         l=3
@@ -273,7 +286,6 @@ for p in range(len(point_cloud)):
     point[5] = colors[l][2]
     w.write("{} {} {} {} {} {}\n".format(point[0],point[1],point[2],point[3],point[4],point[5]))
     printProgressBar(p,len(point_cloud)-1)
-
 
 print("Writing clustered PCD to new file")
 #write header to output file
@@ -295,18 +307,20 @@ for p in range(len(point_cloud)):
     w.write("{} {} {} {} {} {}\n".format(point[0],point[1],point[2],point[3],point[4],point[5]))
     printProgressBar(p,len(point_cloud)-1)
 
-
-
-final_intercept = intersect(intercept_clusters,intercept_clusters2)
-print(final_intercept)
+#find intercept clusters and remove them from the cluster adjacency graph
+final_intercept = intersect(sphere_intercept_clusters,dist_intercept_clusters)
 for n in final_intercept:
     cag.remove_node(n)
 parts = nx.connected_components(cag)
+
+#determine number of components/parts in the PCD
 num_parts = nx.number_connected_components(cag)
 print("Parts found: "+ str(num_parts))
 part_list = []
 for part in parts:
     part_list.append(part)
+
+#write part differentiated pcd to output file
 w = open(out_file2,'w')
 w.write("X Y Z R G B\n")
 #switch to append mode for points
@@ -325,3 +339,5 @@ for p in range(len(point_cloud)):
     point[5] = colors[l][2]
     w.write("{} {} {} {} {} {}\n".format(point[0],point[1],point[2],point[3],point[4],point[5]))
     printProgressBar(p,len(point_cloud)-1)
+with open("./"+name+"/log.json", 'w') as outfile:
+    json.dump(clust_data, outfile, indent=2)
