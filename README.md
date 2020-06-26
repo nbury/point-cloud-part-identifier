@@ -1,5 +1,6 @@
-# point-cloud-part-identifier
+# PointCloud Part Identifier
 A Python Class to find parts in a PCD file by doing a series of tests.
+
 Main Script
 ```
 python run.py
